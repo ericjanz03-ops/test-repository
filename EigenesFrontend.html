@@ -1,0 +1,188 @@
+<html>
+<head>
+    <meta charset = "UTF-8">
+    <meta name = "viewport" content = "width = device-width, initial-scale = 1.0">
+    <title>WebTechnologie Projekt Healthtracker</title>
+    <link rel="stylesheet" href="stylesheet.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    
+</head>
+<body>
+        <div id= "login-screen">
+            <div class = "login-card">
+                <div style="text-align: center; margin-bottom: 20px;">
+                    <h2>Willkommen beim Healthtracker</h2>
+                    <p>Bitte melde dich an.</p>
+                </div>
+
+                <label>Benutzername</label>
+                <input type="text" id="username" placeholder="test">
+
+                <label>Passwort</label>
+                <input type="password" id="password" placeholder="1234">
+
+                <p id="login-error" class="hidden" style="color: var(--col-danger); font-size: 0.9rem;">
+                    Falsche Daten! Versuch es mit "test" / "1234".
+                </p>
+
+                <button onclick="handleLogin()" class="btn-blue" style="margin-top: 10px;">Login</button>
+            </div>
+        </div>
+
+        <div id = "app-screen" class="hidden" style="display: flex; width: 100%; height: 100%;">
+        <aside>
+            <h2>Healthtracker</h2>
+            <p>Hallo, <span id="display-username"></span>!</p>
+            <nav>
+                <a href = "#" onclick="switchTab('fitness')" id = "nav-fitness" class="nav-item active"> Fitness</a>
+                <a href="#" onclick="switchTab('nutrition')" id="nav-nutrition" class="nav-item"> Ernährung</a>
+                <a href="#" onclick="switchTab('mood')" id="nav-mood" class="nav-item"> Stimmung</a>
+                <a href="#" onclick="switchTab('reporting')" id="nav-reporting" class="nav-item"> Reporting</a>
+            </nav>
+            <button onclick="logout()" class="nav-item" style="background:none; text-align:left; border:none; cursor:pointer; margin-top:auto;">Abmelden</button>
+            <button onclick = "resetApp()" class = "btn-red"> Reset data</button>
+        </aside>
+
+        <main>
+            <div id= "view-fitness" class="view-section">
+                <header>
+                    <h1>Fitness Tracker</h1>
+                    <p>Erfasse deine Workouts.</p>
+                </header>
+                <br>
+
+                <div class = "grid-2">
+                    <div class="card">
+                        <h3>Neues Workout</h3>
+                        <label>Aktivität</label>
+                        <input id="fit-activity" type="text" placeholder="z.B. Joggen">
+                    
+                        <label>Dauer (Minuten)</label>
+                        <input id="fit-duration" type="number" placeholder="0">
+
+                        <button onclick = "addWorkout()" class = "btn-blue">Speichern</button>
+                    </div>
+
+                    <div class="card">
+                        <h3>Letzte Workouts</h3>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Aktivität</th>
+                                    <th>Kcal</th>
+                                    <th>Löschen</th>
+                                </tr>
+                            </thead>
+                            <tbody id="list-fitness"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div id="view-nutrition" class="view-section hidden">
+                <header>
+                <h1>Ernährung</h1>
+                <p>Tracke Kalorien mit genauer Grammanzahl.</p>
+                </header>
+                <br>
+
+                <div class="grid-2">
+                    <div class="card">
+                        <h3>Produktsuche</h3>
+                        <div style="display:flex; gap:10px;">
+                            <input id="nut-search" type="text" placeholder="Suche..." onkeypress="if(event.key==='Enter') searchFood()">
+                            <button onclick="searchFood()" class="btn-green" style="width: auto;">Suchen</button>
+                        </div>
+
+                        <div id="nut-error" style="color:red; margin-top:10px;" class="hidden"></div>
+
+                        <div id="nut-preview" class="hidden" style="margin-top:20px; text-align:center;">
+                            <img id="nut-img" src="" style="width:80px; height:80px; object-fit:contain;">
+                            <h4 id="nut-name">Produkt</h4>
+                            <p>Basis: <span id="nut-base-kcal">0</span> kcal / 100g</p>
+                            <div style="background:#f0fdf4; padding:10px; border-radius:8px; margin:10px 0;">
+                                <label>Menge (Gramm)</label>
+                                <input id="nut-weight" type="number" value="100" oninput="updateCalculatedKcal()">
+                                <p>Ergibt: <b><span id="nut-total-calories">0</span> kcal</b></p>
+                            </div>
+
+                            <button onclick="addNutrition()" class="btn-green">Hinzufügen</button>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h3>Gegessen heute</h3>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Produkt</th>
+                                    <th>Kcal</th>
+                                    <th>Löschen</th>
+                                </tr>
+                            </thead>
+                            <tbody id="list-nutrition"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div id="view-mood" class="view-section hidden">
+            <header>
+                <h1>Stimmung & Tagebuch</h1>
+            </header>
+            <br>
+            <div class="grid-2">
+                <div class="card">
+                    <h3 style="text-align:center">Wie war dein Tag?</h3>
+                    <div class="mood-container">
+                        <button onclick="selectMood(1, '😫', this)" class="mood-btn">😫</button>
+                        <button onclick="selectMood(2, '😐', this)" class="mood-btn">😐</button>
+                        <button onclick="selectMood(3, '🙂', this)" class="mood-btn">🙂</button>
+                        <button onclick="selectMood(4, '🤩', this)" class="mood-btn">🤩</button>
+                    </div>
+                    <textarea id="mood-note" rows="4" placeholder="Dein Tagebucheintrag..."></textarea>
+                    <button onclick="saveMood()" class="btn-purple">Speichern</button>
+                </div>
+
+                <div class="card" style="max-height: 500px; overflow-y:auto;">
+                    <h3>Historie</h3>
+                    <div id="list-mood"></div>
+                </div>
+            </div>
+        </div>
+
+        <div id="view-reporting" class="view-section hidden">
+            <header><h1>Reporting</h1></header>
+            <br>
+            <div class="grid-3">
+                <div class="card" style="border-left: 5px solid var(--col-fitness)">
+                    <small>Verbrannt</small>
+                    <h2 id="rep-burned">0 kcal</h2>
+                </div>
+                <div class="card" style="border-left: 5px solid var(--col-nutrition)">
+                    <small>Gegessen</small>
+                    <h2 id="rep-eaten">0 kcal</h2>
+                </div>
+                <div class="card" style="border-left: 5px solid var(--col-mood)">
+                    <small>Stimmung (Ø)</small>
+                    <h2 id="rep-mood">-</h2>
+                </div>
+            </div>
+            <div class="grid-2">
+                <div class="card">
+                    <h3>Stimmungsverlauf</h3>
+                    <canvas id="chartMood"></canvas>
+                </div>
+                <div class="card">
+                    <h3>Bilanz</h3>
+                    <canvas id="chartCal"></canvas>
+                </div>
+            </div>
+        </div>
+
+        </main>
+        </div>
+        <script src="script.js"></script>
+</body>
+</html>
