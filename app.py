@@ -43,7 +43,7 @@ with app.app_context():
 # --- Routen (Frontend ausliefern) ---
 @app.route('/')
 def index():
-    return send_from_directory('.', 'EigenesFrontend.html')
+    return send_from_directory('.', 'index.html')
 
 @app.route('/<path:path>')
 def serve_static(path):
