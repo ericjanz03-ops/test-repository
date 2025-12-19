@@ -9,14 +9,35 @@
 </head>
 <body>
     <div id="login-screen">
-        <div class="login-card">
-            <h2>Willkommen</h2>
-            <input type="text" id="username" placeholder="test" value="test">
-            <input type="password" id="password" placeholder="1234" value="1234">
-            <p id="login-error" class="hidden" style="color:red">Falsch!</p>
-            <button onclick="handleLogin()" class="btn-blue">Login</button>
+    <div class="login-card">
+        <div style="text-align: center; margin-bottom: 20px;">
+            <h2 id="auth-title">Willkommen im LifeTracker</h2>
+            <p id="auth-subtitle">Bitte melde dich an.</p>
         </div>
+
+        <p id="auth-error" class="hidden" style="color: var(--col-delete); font-size: 0.9rem; text-align:center; margin-bottom:10px;"></p>
+        <p id="auth-success" class="hidden" style="color: var(--col-nutrition); font-size: 0.9rem; text-align:center; margin-bottom:10px;"></p>
+
+        <label>Benutzername</label>
+        <input type="text" id="username" placeholder="Dein Name">
+
+        <div id="email-container" class="hidden">
+            <label>E-Mail Adresse</label>
+            <input type="email" id="email" placeholder="name@beispiel.com">
+        </div>
+
+        <label>Passwort</label>
+        <input type="password" id="password" placeholder="Dein Passwort">
+
+        <button id="btn-login" onclick="handleLogin()" class="btn-blue">Einloggen</button>
+        <button id="btn-register" onclick="handleRegister()" class="btn-green hidden">Kostenlos Registrieren</button>
+        
+        <p style="margin-top: 15px; text-align: center; font-size: 0.9rem;">
+            <span id="txt-toggle">Noch kein Konto?</span>
+            <a href="#" onclick="toggleAuthMode()" id="link-toggle" style="color: var(--col-fitness); font-weight: bold;">Jetzt registrieren</a>
+        </p>
     </div>
+</div>
 
     <div id="app-screen" class="hidden" style="display:flex; height:100vh;">
         <aside>

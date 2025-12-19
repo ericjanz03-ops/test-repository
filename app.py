@@ -1,7 +1,9 @@
 import os
-import json
-from flask import Flask, render_template, request, jsonify, send_from_directory
+import uuid
+from datetime import datetime, timedelta
+from flask import Flask, request, jsonify, send_from_directory
 from flask_sqlalchemy import SQLAlchemy
+from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__, static_folder='.', template_folder='.')
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///local.db')
@@ -9,78 +11,135 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
 
-# --- Datenbank Modell ---
+# --- MODELLE ---
+
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(50), unique=True, nullable=False)
+    email = db.Column(db.String(120), unique=True, nullable=False)
+    password_hash = db.Column(db.String(200), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class Session(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    token = db.Column(db.String(36), unique=True, nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    
+    user = db.relationship('User', backref='sessions')
 
 class Category(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    user_name = db.Column(db.String(50), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     name = db.Column(db.String(50), nullable=False)
-    fields_json = db.Column(db.Text, nullable=False, default='[]')
-    # NEU: special_type markiert Kategorien mit Sonderfunktionen (z.B. 'nutrition')
-    special_type = db.Column(db.String(20), nullable=True) 
+    description = db.Column(db.String(200))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    fields = db.relationship('CategoryField', backref='category', cascade="all, delete-orphan")
 
     def to_dict(self):
         return {
             'id': self.id,
             'name': self.name,
-            'fields': json.loads(self.fields_json),
-            'special_type': self.special_type
+            'description': self.description,
+            'fields': [f.to_dict() for f in self.fields]
         }
+
+class CategoryField(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    category_id = db.Column(db.Integer, db.ForeignKey('category.id'), nullable=False)
+    label = db.Column(db.String(50), nullable=False)
+    data_type = db.Column(db.String(20), nullable=False) # 'text', 'number'
+    unit = db.Column(db.String(20))
+
+    def to_dict(self):
+        return {'id': self.id, 'label': self.label, 'unit': self.unit, 'data_type': self.data_type}
 
 class Entry(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    user_name = db.Column(db.String(50), nullable=False)
-    type = db.Column(db.String(50), nullable=False) # Speichert 'cat_<id>'
-    text = db.Column(db.String(200)) 
-    val = db.Column(db.Integer, default=0) # Hauptwert für Charts (z.B. Kcal)
-    details_json = db.Column(db.Text, nullable=True)
-    timestamp = db.Column(db.BigInteger, nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    category_id = db.Column(db.Integer, db.ForeignKey('category.id'), nullable=False)
+    occurred_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    values = db.relationship('EntryValue', backref='entry', cascade="all, delete-orphan")
+    category = db.relationship('Category')
 
     def to_dict(self):
+        details_obj = {}
+        # Wir bauen die Details zusammen
+        for val in self.values:
+            # Feld-Definition laden um Label und Unit zu bekommen
+            field_def = CategoryField.query.get(val.field_id)
+            if field_def:
+                raw_val = val.value_text if val.value_text is not None else val.value_number
+                # Formatierung für Frontend
+                display_val = f"{raw_val} {field_def.unit}" if field_def.unit else str(raw_val)
+                details_obj[field_def.label] = display_val
+
         return {
             'id': self.id,
-            'type': self.type,
-            'text': self.text,
-            'val': self.val,
-            'details': json.loads(self.details_json) if self.details_json else {},
-            'timestamp': self.timestamp
+            'type': f"cat_{self.category_id}",
+            'text': self.category.name,
+            'details': details_obj,
+            'timestamp': int(self.occurred_at.timestamp() * 1000)
         }
+
+class EntryValue(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    entry_id = db.Column(db.Integer, db.ForeignKey('entry.id'), nullable=False)
+    field_id = db.Column(db.Integer, db.ForeignKey('category_field.id'), nullable=False)
+    
+    value_text = db.Column(db.String(500))
+    value_number = db.Column(db.Float)
 
 with app.app_context():
     db.create_all()
 
-# --- Helper: Standard-Kategorien erstellen ---
-def init_defaults_if_needed(username):
-    existing = Category.query.filter_by(user_name=username).first()
-    if existing:
-        return # User hat schon Kategorien
+# --- HELPER: Defaults erstellen ---
 
-    # 1. Fitness (Manuell Werte eintragen)
-    fit = Category(user_name=username, name="Fitness", special_type="fitness",
-                   fields_json=json.dumps([
-                       {"label": "Aktivität", "unit": ""},
-                       {"label": "Verbrannt", "unit": "kcal"}
-                   ]))
+def create_default_categories(user_id):
+    """Erstellt die Standard-Kategorien für einen neuen User"""
     
-    # 2. Ernährung (Mit API Suche)
-    nut = Category(user_name=username, name="Ernährung", special_type="nutrition",
-                   fields_json=json.dumps([
-                       {"label": "Produkt", "unit": ""},
-                       {"label": "Menge", "unit": "g"},
-                       {"label": "Kalorien", "unit": "kcal"} # Wichtig für API Mapping
-                   ]))
+    # 1. Fitness
+    cat_fit = Category(user_id=user_id, name="Fitness", description="Workouts tracken")
+    db.session.add(cat_fit)
+    db.session.flush() # ID generieren
+    
+    db.session.add(CategoryField(category_id=cat_fit.id, label="Aktivität", data_type="text"))
+    db.session.add(CategoryField(category_id=cat_fit.id, label="Dauer", data_type="number", unit="min"))
+    db.session.add(CategoryField(category_id=cat_fit.id, label="Verbrannt", data_type="number", unit="kcal"))
 
-    # 3. Stimmung (Als einfaches Feld)
-    mood = Category(user_name=username, name="Stimmung", special_type="mood",
-                    fields_json=json.dumps([
-                        {"label": "Gefühl", "unit": "1-10"},
-                        {"label": "Notiz", "unit": ""}
-                    ]))
+    # 2. Ernährung
+    cat_nut = Category(user_id=user_id, name="Ernährung", description="Essen tracken")
+    db.session.add(cat_nut)
+    db.session.flush()
 
-    db.session.add_all([fit, nut, mood])
+    db.session.add(CategoryField(category_id=cat_nut.id, label="Produkt", data_type="text"))
+    db.session.add(CategoryField(category_id=cat_nut.id, label="Menge", data_type="number", unit="g"))
+    db.session.add(CategoryField(category_id=cat_nut.id, label="Kalorien", data_type="number", unit="kcal"))
+
+    # 3. Stimmung
+    cat_mood = Category(user_id=user_id, name="Stimmung", description="Wie fühlst du dich?")
+    db.session.add(cat_mood)
+    db.session.flush()
+
+    db.session.add(CategoryField(category_id=cat_mood.id, label="Gefühl", data_type="number", unit="1-10"))
+    db.session.add(CategoryField(category_id=cat_mood.id, label="Notiz", data_type="text"))
+
     db.session.commit()
 
-# --- Routen ---
+# --- AUTH HELPER ---
+def get_user_from_token():
+    auth_header = request.headers.get('Authorization')
+    if not auth_header: return None
+    token = auth_header.replace('Bearer ', '')
+    session = Session.query.filter_by(token=token).first()
+    if session and session.expires_at > datetime.utcnow():
+        return session.user
+    return None
+
+# --- ROUTEN ---
 
 @app.route('/')
 def index(): return send_from_directory('.', 'index.html')
@@ -88,71 +147,131 @@ def index(): return send_from_directory('.', 'index.html')
 @app.route('/<path:path>')
 def serve_static(path): return send_from_directory('.', path)
 
+# Registrierung (MIT DEFAULT CREATION)
+@app.route('/api/register', methods=['POST'])
+def register():
+    data = request.json
+    if User.query.filter_by(username=data['username']).first():
+        return jsonify({"error": "User existiert bereits"}), 400
+    
+    hashed = generate_password_hash(data['password'])
+    new_user = User(username=data['username'], email=data.get('email', 'none'), password_hash=hashed)
+    
+    db.session.add(new_user)
+    db.session.commit()
+    
+    # HIER: Defaults anlegen!
+    create_default_categories(new_user.id)
+    
+    return jsonify({"success": True})
+
 @app.route('/api/login', methods=['POST'])
 def login():
     data = request.json
-    if data.get('username') == 'test' and data.get('password') == '1234':
-        return jsonify({"success": True, "username": "test"})
+    user = User.query.filter_by(username=data['username']).first()
+    
+    if user and check_password_hash(user.password_hash, data['password']):
+        Session.query.filter(Session.expires_at < datetime.utcnow()).delete()
+        token = str(uuid.uuid4())
+        expires = datetime.utcnow() + timedelta(days=30)
+        db.session.add(Session(token=token, user_id=user.id, expires_at=expires))
+        db.session.commit()
+        return jsonify({"success": True, "token": token, "username": user.username})
+    
     return jsonify({"success": False}), 401
 
 @app.route('/api/categories', methods=['GET'])
 def get_categories():
-    username = request.args.get('user')
-    if not username: return jsonify([]), 400
-    
-    # HIER: Prüfen und Defaults erstellen
-    init_defaults_if_needed(username)
-    
-    cats = Category.query.filter_by(user_name=username).all()
+    user = get_user_from_token()
+    if not user: return jsonify({"error": "Unauthorized"}), 401
+    cats = Category.query.filter_by(user_id=user.id).all()
     return jsonify([c.to_dict() for c in cats])
 
 @app.route('/api/categories', methods=['POST'])
 def add_category():
+    user = get_user_from_token()
+    if not user: return jsonify({"error": "Unauthorized"}), 401
     data = request.json
-    fields_str = json.dumps(data.get('fields', []))
-    new_cat = Category(
-        user_name=data.get('user'),
-        name=data.get('name'),
-        fields_json=fields_str,
-        special_type='custom' # Neue User-Kategorien sind Standard
-    )
+    
+    new_cat = Category(user_id=user.id, name=data['name'], description=data.get('desc'))
     db.session.add(new_cat)
+    db.session.flush()
+
+    for f in data.get('fields', []):
+        db.session.add(CategoryField(
+            category_id=new_cat.id,
+            label=f['label'],
+            unit=f.get('unit'),
+            data_type=f.get('data_type', 'text')
+        ))
+    
     db.session.commit()
     return jsonify(new_cat.to_dict())
 
 @app.route('/api/entries', methods=['GET'])
 def get_entries():
-    username = request.args.get('user')
-    entries = Entry.query.filter_by(user_name=username).order_by(Entry.timestamp.desc()).all()
+    user = get_user_from_token()
+    if not user: return jsonify({"error": "Unauthorized"}), 401
+    entries = Entry.query.filter_by(user_id=user.id).order_by(Entry.occurred_at.desc()).all()
     return jsonify([e.to_dict() for e in entries])
 
 @app.route('/api/entries', methods=['POST'])
 def add_entry():
+    user = get_user_from_token()
+    if not user: return jsonify({"error": "Unauthorized"}), 401
     data = request.json
+    
+    try:
+        cat_id = int(data['type'].split('_')[1])
+    except:
+        return jsonify({"error": "Invalid Type"}), 400
+
     new_entry = Entry(
-        user_name=data.get('user'),
-        type=data.get('type'),
-        text=data.get('text'),
-        val=data.get('val', 0),
-        details_json=json.dumps(data.get('details', {})),
-        timestamp=data.get('timestamp')
+        user_id=user.id,
+        category_id=cat_id,
+        occurred_at=datetime.fromtimestamp(data['timestamp'] / 1000.0)
     )
     db.session.add(new_entry)
+    db.session.flush()
+
+    category = Category.query.get(cat_id)
+    for label, val_string in data.get('details', {}).items():
+        field = next((f for f in category.fields if f.label == label), None)
+        if field:
+            val_entry = EntryValue(entry_id=new_entry.id, field_id=field.id)
+            if field.data_type == 'number':
+                try:
+                    val_entry.value_number = float(val_string)
+                except:
+                    val_entry.value_text = val_string # Fallback
+            else:
+                val_entry.value_text = val_string
+            db.session.add(val_entry)
+
     db.session.commit()
     return jsonify(new_entry.to_dict())
 
 @app.route('/api/entries/<int:id>', methods=['DELETE'])
 def delete_entry(id):
-    Entry.query.filter_by(id=id).delete()
+    user = get_user_from_token()
+    if not user: return jsonify({"error": "Unauthorized"}), 401
+    Entry.query.filter_by(id=id, user_id=user.id).delete()
     db.session.commit()
     return jsonify({"success": True})
 
 @app.route('/api/reset', methods=['POST'])
 def reset_data():
-    username = request.json.get('user')
-    Entry.query.filter_by(user_name=username).delete()
-    Category.query.filter_by(user_name=username).delete() # Löscht auch Kategorien für sauberen Neustart
+    user = get_user_from_token()
+    if not user: return jsonify({"error": "Unauthorized"}), 401
+    
+    # Lösche alles vom User
+    Entry.query.filter_by(user_id=user.id).delete()
+    Category.query.filter_by(user_id=user.id).delete()
     db.session.commit()
+    
+    # Erstelle Defaults neu
+    create_default_categories(user.id)
+    
     return jsonify({"success": True})
 
 if __name__ == '__main__':
