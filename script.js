@@ -411,12 +411,12 @@ function addFieldRow() {
     
     // HTML für eine Zeile: Label (Text), Typ (Select), Einheit (Text)
     div.innerHTML = `
-        <input type="text" class="f-label" placeholder="Feldname (z.B. Gewicht)" style="flex:2; padding:8px;">
-        <select class="f-type" style="flex:1; padding:8px;">
+        <input type="text" class="f-label" placeholder="Feldname (z.B. Gewicht)"; padding:10px;">
+        <select class="f-type" style="flex:1; padding:10px;">
             <option value="number">Zahl</option>
             <option value="text">Text</option>
         </select>
-        <input type="text" class="f-unit" placeholder="Einheit (z.B. kg)" style="flex:1; padding:8px;">
+        <input type="text" class="f-unit" placeholder="Einheit (z.B. kg)"; padding:10px;">
         <button onclick="this.parentElement.remove()" style="background:#fcc; border:none; border-radius:4px; cursor:pointer; padding:0 10px;">X</button>
     `;
     container.appendChild(div);
