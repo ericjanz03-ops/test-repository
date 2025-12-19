@@ -1,380 +1,293 @@
-// Globale Variablen
+let currentUser = null;
+let categories = [];
 let entries = [];
-let currentUser = null; 
+let currentCategory = null; // Die aktuell offene Kategorie
 
-// Temp Variablen
-let tempFood = null;
-let selectedMoodScore = null;
-let selectedMoodIcon = null;
-
-// Initialisierung
-document.addEventListener('DOMContentLoaded', () => {
-    // Prüfen ob User im "Session Storage" ist (nur für Browser-Session merken)
-    const savedUser = sessionStorage.getItem('healthtracker_user');
-    
-    if (savedUser) {
-        currentUser = savedUser;
-        showMainApp();
-    } else {
-        showLoginScreen();
-    }
-});
-
-function showLoginScreen() {
-    document.getElementById('login-screen').classList.remove('hidden');
-    document.getElementById('app-screen').classList.add('hidden');
-}
-
-async function showMainApp() {
-    document.getElementById('login-screen').classList.add('hidden');
-    document.getElementById('app-screen').classList.remove('hidden');
-    document.getElementById('display-username').innerText = currentUser;
-    
-    // WICHTIG: Daten vom Server laden statt localStorage
-    await loadDataFromServer();
-    
-    switchTab('fitness');
-}
-
-// --- API Helper Funktionen ---
-
-async function loadDataFromServer() {
-    try {
-        const res = await fetch(`/api/entries?user=${currentUser}`);
-        entries = await res.json();
-        renderLists();
-        updateCharts();
-    } catch (e) {
-        console.error("Fehler beim Laden:", e);
-    }
-}
-
-async function sendEntryToServer(entry) {
-    try {
-        // Wir fügen den Usernamen hinzu, damit das Backend weiß, wem es gehört
-        entry.user = currentUser;
-        
-        const res = await fetch('/api/entries', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(entry)
-        });
-        const savedEntry = await res.json();
-        
-        // Füge den vom Server bestätigten Eintrag (mit echter DB-ID) zur lokalen Liste hinzu
-        entries.push(savedEntry);
-        renderLists();
-        updateCharts();
-    } catch (e) {
-        console.error("Fehler beim Speichern:", e);
-    }
-}
-
-async function deleteEntryFromServer(id) {
-    try {
-        await fetch(`/api/entries/${id}`, { method: 'DELETE' });
-        entries = entries.filter(e => e.id !== id);
-        renderLists();
-        updateCharts();
-    } catch (e) {
-        console.error("Fehler beim Löschen:", e);
-    }
-}
-
-// --- Login Logik ---
-
+// --- Init ---
 async function handleLogin() {
-    const usernameInput = document.getElementById('username').value;
-    const passwordInput = document.getElementById('password').value;
-
-    try {
-        const res = await fetch('/api/login', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ username: usernameInput, password: passwordInput })
-        });
-        const data = await res.json();
-
-        if (data.success) {
-            currentUser = data.username;
-            sessionStorage.setItem('healthtracker_user', currentUser);
-            showMainApp();
-        } else {
-            document.getElementById('login-error').classList.remove('hidden');
-        }
-    } catch (e) {
-        alert("Login Server Fehler");
+    const u = document.getElementById('username').value;
+    const p = document.getElementById('password').value;
+    const res = await fetch('/api/login', {
+        method: 'POST', 
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({username: u, password: p})
+    });
+    const data = await res.json();
+    if(data.success) {
+        currentUser = data.username;
+        document.getElementById('login-screen').classList.add('hidden');
+        document.getElementById('app-screen').classList.remove('hidden');
+        document.getElementById('display-username').innerText = currentUser;
+        loadData();
+    } else {
+        document.getElementById('login-error').classList.remove('hidden');
     }
 }
 
-function logout() {
-    if (confirm("Möchtest du dich wirklich abmelden?")) {
-        sessionStorage.removeItem('healthtracker_user');
-        currentUser = null;
-        entries = [];
-        showLoginScreen();
-    }
+async function loadData() {
+    // 1. Kategorien holen (Backend erstellt jetzt Defaults wenn leer!)
+    const cRes = await fetch(`/api/categories?user=${currentUser}`);
+    categories = await cRes.json();
+    
+    // 2. Einträge holen
+    const eRes = await fetch(`/api/entries?user=${currentUser}`);
+    entries = await eRes.json();
+
+    renderSidebar();
+    
+    // Öffne erste Kategorie standardmäßig
+    if(categories.length > 0) openCategory(categories[0]);
 }
 
-// --- Reset ---
-
-async function resetApp() {
-    if (confirm("Wirklich alle Daten löschen?")) {
-        await fetch('/api/reset', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ user: currentUser })
-        });
-        entries = [];
-        renderLists();
-        updateCharts();
-    }
+// --- Sidebar ---
+function renderSidebar() {
+    const nav = document.getElementById('nav-container');
+    nav.innerHTML = '';
+    categories.forEach(cat => {
+        const a = document.createElement('a');
+        a.className = 'nav-item';
+        a.id = `nav-cat-${cat.id}`;
+        a.innerText = cat.name;
+        // Icon Logik (Optional)
+        if(cat.special_type === 'fitness') a.innerText += ' 🏃';
+        if(cat.special_type === 'nutrition') a.innerText += ' 🍎';
+        if(cat.special_type === 'mood') a.innerText += ' 🧠';
+        
+        a.onclick = () => openCategory(cat);
+        nav.appendChild(a);
+    });
 }
 
-// --- Navigation & Charts (bleiben gleich, rufen nur renderLists auf) ---
-function switchTab(tabId) {
-    document.querySelectorAll('.view-section').forEach(el => el.classList.add('hidden'));
-    const targetView = document.getElementById('view-' + tabId);
-    if (targetView) targetView.classList.remove('hidden');
+// --- Hauptlogik: Kategorie öffnen ---
+function openCategory(cat) {
+    currentCategory = cat;
+    switchTab('generic');
 
-    document.querySelectorAll('.nav-item').forEach(el => {
-        el.classList.remove('active', 'active-fitness', 'active-nutrition', 'active-mood', 'active-reporting');
-    })
+    document.getElementById('gen-title').innerText = cat.name;
+    const widgetArea = document.getElementById('special-widget-container');
+    const inputArea = document.getElementById('gen-inputs-container');
+    
+    widgetArea.innerHTML = ''; 
+    inputArea.innerHTML = '';
 
-    const activeBtn = document.getElementById('nav-' + tabId);
-    if (activeBtn) {
-        activeBtn.classList.add('active');
-        activeBtn.classList.add('active-' + tabId);
+    // A. Spezial-Widgets rendern (API Suche!)
+    if (cat.special_type === 'nutrition') {
+        widgetArea.innerHTML = `
+            <div style="display:flex; gap:10px; background:#e6fffa; padding:15px; border-radius:8px;">
+                <input id="api-search-input" type="text" placeholder="Produkt suchen (z.B. Apfel)..." style="margin:0;">
+                <button onclick="runApiSearch()" class="btn-green" style="width:auto;">Suchen</button>
+            </div>
+            <div id="api-error" style="color:red; margin-top:5px;"></div>
+        `;
     }
 
-    if (tabId === 'reporting') updateCharts();
-    renderLists();
+    // B. Variable Felder rendern
+    cat.fields.forEach((field, idx) => {
+        const div = document.createElement('div');
+        div.innerHTML = `
+            <label>${field.label} <small>(${field.unit})</small></label>
+            <input type="text" class="gen-input" data-label="${field.label}" data-unit="${field.unit}" id="field-input-${idx}">
+        `;
+        inputArea.appendChild(div);
+    });
+
+    renderEntryList();
+    highlightNav(`nav-cat-${cat.id}`);
 }
 
-// --- Fitness Logic (NEU mit Speicherlogik) ---
-function addWorkout() {
-    const activityInput = document.getElementById('fit-activity');
-    const durationInput = document.getElementById('fit-duration');
-
-    if (!activityInput.value || !durationInput.value) {
-        alert("Bitte ausfüllen");
-        return;
-    }
-
-    // Einfache Kalorienberechnung (z.B. 5 kcal pro Minute)
-    const duration = parseInt(durationInput.value);
-    const estimatedKcal = duration * 7; 
-
-    const newEntry = {
-        type: 'fitness',
-        text: `${activityInput.value} (${duration} min)`,
-        val: estimatedKcal,
-        timestamp: Date.now()
-    };
-
-    // An Server senden
-    sendEntryToServer(newEntry);
-
-    // Reset Inputs
-    activityInput.value = '';
-    durationInput.value = '';
-}
-
-// --- Nutrition Logic ---
-async function searchFood() {
-    // (Bleibt gleich wie in deinem Code)
-    const query = document.getElementById('nut-search').value.trim();
-    if (!query) return;
-
+// --- API Suche Logik ---
+async function runApiSearch() {
+    const query = document.getElementById('api-search-input').value;
+    if(!query) return;
+    
     try {
         const res = await fetch(`https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(query)}&search_simple=1&action=process&json=1&page_size=1`);
         const data = await res.json();
-
-        if (data.products && data.products.length > 0) {
+        
+        if(data.products && data.products.length > 0) {
             const p = data.products[0];
-            let kcal = p.nutriments['energy-kcal_100g'] || p.nutriments['energy-kcal'] || 0;
-            
-            tempFood = { 
-                name: p.product_name, 
-                kcalPer100: Math.round(kcal), 
-                img: p.image_front_small_url || '' 
-            };
+            const kcal = p.nutriments['energy-kcal_100g'] || 0;
+            const name = p.product_name;
 
-            document.getElementById('nut-weight').value = 100;
-            document.getElementById('nut-name').innerText = tempFood.name;
-            document.getElementById('nut-base-kcal').innerText = tempFood.kcalPer100;
-            document.getElementById('nut-img').src = tempFood.img;
-            document.getElementById('nut-preview').classList.remove('hidden');
-            updateCalculatedKcal();
+            // Fülle die Felder automatisch!
+            // Wir suchen Inputs anhand ihres Labels (Case Insensitive)
+            fillInputByLabel('Produkt', name);
+            fillInputByLabel('Kalorien', kcal);
+            
+            // Fokus auf Menge setzen für schnelle Eingabe
+            const amountField = findInputByLabel('Menge');
+            if(amountField) amountField.focus();
+
+        } else {
+            document.getElementById('api-error').innerText = "Nichts gefunden.";
         }
     } catch(e) {
         console.error(e);
-        alert("Fehler bei der Suche!");
+        document.getElementById('api-error').innerText = "API Fehler.";
     }
 }
 
-function updateCalculatedKcal() {
-    if (!tempFood) return;
-    const weight = parseInt(document.getElementById('nut-weight').value) || 0;
-    const totalcalories = Math.round((weight/100) * tempFood.kcalPer100);
-    document.getElementById('nut-total-calories').innerText = totalcalories;
-}
-
-function addNutrition() {
-    if(!tempFood) return;
-    
-    const weight = parseInt(document.getElementById('nut-weight').value) || 0;
-    const totalKcal = parseInt(document.getElementById('nut-total-calories').innerText) || 0;
-
-    const newEntry = {
-        type: 'nutrition',
-        text: tempFood.name + ` (${weight}g)`,
-        val: totalKcal,
-        timestamp: Date.now()
-    };
-
-    sendEntryToServer(newEntry);
-
-    document.getElementById('nut-preview').classList.add('hidden');
-    document.getElementById('nut-search').value = '';
-    tempFood = null;
-}
-
-// --- Mood Tracker Logic ---
-function selectMood(score, icon, btnElement) {
-    selectedMoodScore = score;
-    selectedMoodIcon = icon;
-    document.querySelectorAll('.mood-btn').forEach(button => {
-        button.classList.remove('selected')
-        button.style.opacity = '0.5'
-    });
-    btnElement.classList.add('selected');
-    btnElement.style.opacity = '1';
-}
-
-function saveMood() {
-    if(!selectedMoodScore) {
-        alert("Bitte erst eine Stimmung wählen!");
-        return;
-    }
-    
-    const note = document.getElementById('mood-note').value;
-
-    const newEntry = {
-        type: 'mood',
-        text: 'Stimmung',
-        score: selectedMoodScore,
-        icon: selectedMoodIcon,
-        note: note,
-        val: 0,
-        timestamp: Date.now()
-    };
-
-    sendEntryToServer(newEntry);
-
-    // Reset
-    document.getElementById('mood-note').value = '';
-    selectedMoodScore = null;
-    document.querySelectorAll('.mood-btn').forEach(b => {
-        b.classList.remove('selected');
-        b.style.opacity = '0.5';
+function fillInputByLabel(partOfLabel, value) {
+    const inputs = document.querySelectorAll('.gen-input');
+    inputs.forEach(input => {
+        const lbl = input.getAttribute('data-label').toLowerCase();
+        if(lbl.includes(partOfLabel.toLowerCase())) {
+            input.value = value;
+        }
     });
 }
-
-// --- Render Logic (Löschen angepasst) ---
-function del(id) {
-    // Hier rufen wir nun die Server-Löschung auf
-    deleteEntryFromServer(id);
+function findInputByLabel(partOfLabel) {
+    return Array.from(document.querySelectorAll('.gen-input')).find(i => i.getAttribute('data-label').toLowerCase().includes(partOfLabel.toLowerCase()));
 }
 
-function renderLists() {
-    // A. Fitness Liste
-    const fitnessEntries = entries.filter(e => e.type === 'fitness');
-    document.getElementById('list-fitness').innerHTML = fitnessEntries.map(e => `
-        <tr>
-            <td>${e.text}<br><small style="color:#999">${new Date(e.timestamp).toLocaleTimeString()}</small></td>
-            <td style="font-weight:bold; color:var(--col-fitness)">-${e.val} kcal</td>
-            <td><button onclick="del(${e.id})" class="btn-small btn-red">X</button></td>
-        </tr>
-    `).join('');
-
-    // B. Nutrition Liste
-    const nutEntries = entries.filter(e => e.type === 'nutrition');
-    document.getElementById('list-nutrition').innerHTML = nutEntries.map(e => `
-        <tr>
-            <td>${e.text}<br><small style="color:#999">${new Date(e.timestamp).toLocaleTimeString()}</small></td>
-            <td style="font-weight:bold; color:var(--col-nutrition)">+${e.val} kcal</td>
-            <td><button onclick="del(${e.id})" class="btn-small btn-red">X</button></td>
-        </tr>
-    `).join('');
+// --- Speichern ---
+async function addGenericEntry() {
+    if(!currentCategory) return;
     
-    // C. Mood Liste
-    const moodEntries = entries.filter(e => e.type === 'mood');
-    document.getElementById('list-mood').innerHTML = moodEntries.map(e => `
-        <div style="border-bottom:1px solid #eee; padding:10px 0; display:flex; gap:10px;">
-            <div style="font-size:2rem">${e.icon}</div>
-            <div>
-                <b>${e.text}</b> <small>${new Date(e.timestamp).toLocaleDateString()}</small>
-                <p style="margin:5px 0; color:#555"><i>${e.note || ''}</i></p>
-                <button onclick="del(${e.id})" style="color:red; background:none; border:none; cursor:pointer;">Löschen</button>
-            </div>
-        </div>
-    `).join('');
+    const inputs = document.querySelectorAll('.gen-input');
+    const details = {};
+    let mainVal = 0;
+    let summary = "";
+    let hasVal = false;
+
+    inputs.forEach(input => {
+        const val = input.value;
+        const label = input.getAttribute('data-label');
+        const unit = input.getAttribute('data-unit');
         
-    updateStats();
-}
-
-function updateStats() {
-    let b=0, e=0, ms=0, mc=0;
-    entries.forEach(x => {
-        if(x.type==='fitness') b+=x.val;
-        if(x.type==='nutrition') e+=x.val;
-        if(x.type==='mood') { ms+=x.score; mc++; }
-    });
-    
-    document.getElementById('rep-burned').innerText = b + ' kcal';
-    document.getElementById('rep-eaten').innerText = e + ' kcal';
-    document.getElementById('rep-mood').innerText = mc ? (ms/mc).toFixed(1) : '-';
-}
-
-let ch1, ch2; 
-
-function updateCharts() {
-    if(document.getElementById('view-reporting').classList.contains('hidden')) return;
-    
-    // Daten sortieren
-    const data = [...entries].sort((a,b) => a.timestamp - b.timestamp);
-    
-    // 1. Mood Chart
-    if(ch1) ch1.destroy();
-    ch1 = new Chart(document.getElementById('chartMood'), {
-        type: 'line',
-        data: {
-            labels: data.filter(x=>x.type==='mood').map(x => new Date(x.timestamp).toLocaleDateString()),
-            datasets: [{ 
-                label: 'Stimmung', 
-                data: data.filter(x=>x.type==='mood').map(x=>x.score), 
-                borderColor: '#a855f7', 
-                fill:true 
-            }]
-        },
-        options: { scales: {y:{min:0, max:5}} }
+        if(val) {
+            details[label] = val + " " + unit;
+            summary += `${label}: ${val} | `;
+            
+            // Intelligente "Wert"-Erkennung für Charts
+            // Wenn Einheit 'kcal' enthält, nimm das als Hauptwert
+            if(unit.toLowerCase().includes('kcal')) {
+                mainVal = parseFloat(val);
+                hasVal = true;
+            }
+        }
     });
 
-    // 2. Calorie Chart
-    let b=0, e=0;
-    entries.forEach(x => { if(x.type==='fitness') b+=x.val; if(x.type==='nutrition') e+=x.val; });
+    if(!hasVal && inputs.length > 0 && inputs[0].value) {
+        // Fallback: Nimm den ersten numerischen Wert, falls keine Kcal gefunden wurden
+         const num = parseFloat(inputs[0].value);
+         if(!isNaN(num)) mainVal = num;
+    }
+
+    const newEntry = {
+        user: currentUser,
+        type: 'cat_' + currentCategory.id,
+        text: currentCategory.name,
+        val: mainVal,
+        details: details,
+        timestamp: Date.now()
+    };
+
+    await fetch('/api/entries', {
+        method:'POST', 
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(newEntry)
+    });
     
-    if(ch2) ch2.destroy();
-    ch2 = new Chart(document.getElementById('chartCal'), {
+    loadData(); // Reload
+}
+
+// --- Create Category Logik ---
+function initCreateView() {
+    document.getElementById('new-cat-name').value = '';
+    document.getElementById('field-list-container').innerHTML = '';
+    addFieldRow(); // Ein Feld min.
+}
+
+function addFieldRow() {
+    const div = document.createElement('div');
+    div.className = 'field-row';
+    div.style.marginBottom = '10px';
+    div.innerHTML = `<input class="f-lbl" placeholder="Feldname" style="width:45%;display:inline"> <input class="f-unit" placeholder="Einheit" style="width:45%;display:inline">`;
+    document.getElementById('field-list-container').appendChild(div);
+}
+
+async function createCategory() {
+    const name = document.getElementById('new-cat-name').value;
+    const rows = document.querySelectorAll('.field-row');
+    const fields = [];
+    rows.forEach(r => {
+        const l = r.querySelector('.f-lbl').value;
+        const u = r.querySelector('.f-unit').value;
+        if(l) fields.push({label:l, unit:u});
+    });
+
+    if(!name || fields.length===0) return alert("Fehlt was!");
+
+    await fetch('/api/categories', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({user:currentUser, name:name, fields:fields})
+    });
+    loadData();
+}
+
+// --- Standard Helpers ---
+function switchTab(id) {
+    document.querySelectorAll('.view-section').forEach(e => e.classList.add('hidden'));
+    document.getElementById('view-' + id).classList.remove('hidden');
+    if(id === 'create-category') initCreateView();
+    if(id === 'reporting') updateChart();
+}
+
+function highlightNav(id) {
+    document.querySelectorAll('.nav-item').forEach(e => e.classList.remove('active'));
+    const el = document.getElementById(id);
+    if(el) el.classList.add('active');
+}
+
+function renderEntryList() {
+    const list = document.getElementById('list-generic');
+    // Filtere Einträge für aktuelle Kategorie
+    const myEntries = entries.filter(e => e.type === 'cat_' + currentCategory.id);
+    
+    list.innerHTML = myEntries.map(e => {
+        let det = "";
+        for(let k in e.details) det += `<div><b>${k}:</b> ${e.details[k]}</div>`;
+        return `<tr><td>${det}</td><td>${new Date(e.timestamp).toLocaleTimeString()}</td><td><button onclick="del(${e.id})" style="color:red">X</button></td></tr>`;
+    }).join('');
+}
+
+async function del(id) {
+    await fetch('/api/entries/' + id, {method:'DELETE'});
+    loadData();
+}
+
+function logout() { location.reload(); }
+async function resetApp() { 
+    if(confirm("Alles löschen?")) {
+        await fetch('/api/reset', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({user:currentUser})});
+        location.reload(); 
+    }
+}
+
+// --- Chart (Simpel: Balance) ---
+let myChart;
+function updateChart() {
+    const ctx = document.getElementById('chart-balance');
+    
+    // Summiere Values pro Kategorie-Typ
+    const sums = {};
+    entries.forEach(e => {
+        if(!sums[e.text]) sums[e.text] = 0;
+        sums[e.text] += e.val;
+    });
+
+    if(myChart) myChart.destroy();
+    myChart = new Chart(ctx, {
         type: 'bar',
-        data: { 
-            labels: ['Verbrannt', 'Aufgenommen'], 
-            datasets: [{ 
-                label: 'Kcal', 
-                data: [b, e], 
-                backgroundColor: ['#3b82f6', '#22c55e'] 
-            }] 
+        data: {
+            labels: Object.keys(sums),
+            datasets: [{
+                label: 'Summe (Kcal/Min/Score)',
+                data: Object.values(sums),
+                backgroundColor: ['#3b82f6', '#22c55e', '#a855f7', '#eab308']
+            }]
         }
     });
 }
