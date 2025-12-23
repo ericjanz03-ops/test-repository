@@ -27,7 +27,7 @@ function showLoginScreen() {
 function showAppScreen() {
     document.getElementById('login-screen').classList.add('hidden');
     document.getElementById('app-screen').classList.remove('hidden');
-    document.getElementById('display-username').innerText = currentUser;
+    document.getElementById('display-username').innerText = "Hallo " + currentUser + "!";
 }
 
 // Zentrale Fetch-Funktion (fügt automatisch den Token hinzu)
@@ -363,7 +363,7 @@ function renderEntryList() {
         let detailsHtml = '';
         if (e.details) {
             for (const [key, val] of Object.entries(e.details)) {
-                detailsHtml += `<span style="display:inline-block; margin-right:10px; padding:2px 6px; background:#f0f9ff; border-radius:4px; font-size:0.85rem;">
+                detailsHtml += `<span style="display:inline-block; margin-right:10px; padding:2px 6px; background:#f0f9ff; font-size:0.85rem;">
                     <b>${key}:</b> ${val}
                 </span>`;
             }
